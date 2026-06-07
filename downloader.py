@@ -1,44 +1,54 @@
-#nuitka-project:--onefile 
-#nuitka-project:--plugin-enable=pyside6 
-#nuitka-project:--include-data-files=design.ui=design.ui 
-#nuitka-project:--include-data-files=ffmpeg.exe=ffmpeg.exe 
-#nuitka-project:--include-data-files=ffprobe.exe=ffprobe.exe 
-#nuitka-project:--include-data-files=yt-dlp.exe=yt-dlp.exe 
-#nuitka-project:--company-name="Piotr Kiryk @ 3ForceIT" 
-#nuitka-project:--product-name="Pobieracz Youtube" 
-#nuitka-project:--product-version=1.3.0 
+#nuitka-project:--onefile
+#nuitka-project:--plugin-enable=pyside6
+#nuitka-project:--include-data-files=design.ui=design.ui
+#nuitka-project:--include-data-files=ffmpeg.exe=ffmpeg.exe
+#nuitka-project:--include-data-files=ffprobe.exe=ffprobe.exe
+#nuitka-project:--include-data-files=yt-dlp.exe=yt-dlp.exe
+#nuitka-project:--company-name="Piotr Kiryk @ 3ForceIT"
+#nuitka-project:--product-name="Pobieracz Youtube"
+#nuitka-project:--product-version=1.3.0
 #nuitka-project:--windows-console-mode=attach
+"""Prosty pobieracz filmów i audio z YouTube oparty na yt-dlp i PySide6."""
 
 import sys
 import subprocess
 import os
 import re
+
+# pylint: disable=import-error
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, QThread, Signal
+# pylint: enable=import-error
 
 YTDLP_BIN = "yt-dlp.exe"
 
-def get_bundle_dir():
+
+def get_bundle_dir() -> str:
+    """Zwraca katalog, w którym znajduje się plik wykonywalny lub skrypt."""
     if hasattr(sys, "frozen"):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 
 class DownloadWorker(QThread):
-    """Wątek tła, który pobiera dane z yt-dlp i na bieżąco aktualizuje pasek postępu"""
+    """Wątek tła pobierający dane z yt-dlp i raportujący postęp do głównego okna."""
+
     progress_changed = Signal(int)  # Wysyła procenty (0-100) do głównego okna
     status_changed = Signal(str)    # Wysyła aktualny tekst statusu
     finished = Signal(bool, str)    # Wysyła wynik (sukces, tekst_wyjsciowy) po zakończeniu
 
     def __init__(self, command):
+        """Inicjalizuje wątek z podaną komendą do uruchomienia."""
         super().__init__()
         self.command = command
         self._process = None
 
     def run(self):
+        """Uruchamia proces yt-dlp i na bieżąco przekazuje postęp przez sygnały."""
         try:
-            self._process = subprocess.Popen(
+            # Nie możemy użyć 'with' — potrzebujemy referencji do _process w cancel()
+            self._process = subprocess.Popen(  # pylint: disable=consider-using-with
                 self.command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -72,7 +82,7 @@ class DownloadWorker(QThread):
             else:
                 self.finished.emit(False, output_text)
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             self.finished.emit(False, str(e))
 
     def cancel(self):
@@ -82,7 +92,10 @@ class DownloadWorker(QThread):
 
 
 class DownloaderApp:
+    """Główna klasa aplikacji — ładuje UI i obsługuje logikę pobierania."""
+
     def __init__(self):
+        """Ładuje plik interfejsu i podpina sygnały do slotów."""
         loader = QUiLoader()
         ui_file_path = os.path.join(get_bundle_dir(), "design.ui")
         ui_file = QFile(ui_file_path)
@@ -112,6 +125,7 @@ class DownloaderApp:
         return file_path
 
     def save_file_dialog(self):
+        """Waliduje URL, otwiera okno zapisu i uruchamia pobieranie."""
         url = self.ui.uRLFilmuLineEdit.text().strip()
         if not url:
             QMessageBox.warning(self.ui, "Błąd", "Wklej najpierw URL do filmu!")
@@ -125,7 +139,10 @@ class DownloaderApp:
         ytdlp_exe = os.path.join(bundle_dir, YTDLP_BIN)
 
         if not os.path.exists(ytdlp_exe):
-            QMessageBox.critical(self.ui, "Błąd krytyczny", f"Brak pliku silnika pobierania ({YTDLP_BIN})!")
+            QMessageBox.critical(
+                self.ui, "Błąd krytyczny",
+                f"Brak pliku silnika pobierania ({YTDLP_BIN})!"
+            )
             return
 
         current_index = self.ui.formatComboBox.currentIndex()
@@ -169,10 +186,12 @@ class DownloaderApp:
         self.start_download_thread(command)
 
     def cancel_download(self):
+        """Anuluje trwające pobieranie."""
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
 
     def start_download_thread(self, command):
+        """Blokuje UI, pokazuje pasek postępu i uruchamia wątek pobierania."""
         if self.worker and self.worker.isRunning():
             return
 
@@ -183,13 +202,14 @@ class DownloaderApp:
         self.ui.statusLabel.setHidden(False)
         self.ui.cancelButton.setHidden(False)
 
-        self.worker = DownloadWorker(command)
+        self.worker = DownloadWorker(command)  # pylint: disable=attribute-defined-outside-init
         self.worker.progress_changed.connect(self.ui.progressBar.setValue)
         self.worker.status_changed.connect(self.ui.statusLabel.setText)
         self.worker.finished.connect(self.on_download_finished)
         self.worker.start()
 
     def on_download_finished(self, success, output_text):
+        """Przywraca UI po zakończeniu pobierania i informuje o wyniku."""
         self.ui.progressBar.setValue(0)
         self.ui.progressBar.setHidden(True)
         self.ui.statusLabel.setHidden(True)
@@ -203,11 +223,14 @@ class DownloaderApp:
             if "ERROR:" in output_text:
                 for line in output_text.splitlines():
                     if line.startswith("ERROR:"):
-                        error_msg = f"YouTube zgłosił problem:\n{line.replace('ERROR:', '').strip()}"
+                        error_msg = (
+                            f"YouTube zgłosił problem:\n{line.replace('ERROR:', '').strip()}"
+                        )
                         break
             QMessageBox.critical(self.ui, "Błąd pobierania", error_msg)
 
     def show(self):
+        """Wyświetla główne okno aplikacji."""
         self.ui.show()
 
 
