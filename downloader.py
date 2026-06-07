@@ -17,6 +17,8 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, QThread, Signal
 
+YTDLP_BIN = "yt-dlp.exe"
+
 def get_bundle_dir():
     if hasattr(sys, "frozen"):
         return os.path.dirname(sys.executable)
@@ -80,46 +82,50 @@ class DownloaderApp:
         if not ui_file.open(QFile.ReadOnly):
             QMessageBox.critical(None, "Błąd", "Nie znaleziono pliku interfejsu (design.ui)!")
             sys.exit(1)
-            
+
         self.ui = loader.load(ui_file)
         ui_file.close()
-        
-        # Ukrywamy pasek postępu na starcie aplikacji
+
         self.ui.progressBar.setHidden(True)
         self.ui.progressBar.setValue(0)
-        
-        # Podpięcie przycisku do akcji
+
         self.ui.pushButton.clicked.connect(self.save_file_dialog)
+        self.worker = None
+
+    def _get_save_path(self, title: str, ext: str, filter_str: str) -> str | None:
+        """Otwiera okno dialogowe zapisu i zwraca zweryfikowaną ścieżkę, lub None jeśli anulowano."""
+        file_path, _ = QFileDialog.getSaveFileName(self.ui, title, "", filter_str)
+        if not file_path:
+            return None
+        if not file_path.endswith(f'.{ext}'):
+            file_path += f'.{ext}'
+        return file_path
 
     def save_file_dialog(self):
-        # Pobieramy URL i czyścimy z przypadkowych spacji (idiotoodporność)
         url = self.ui.uRLFilmuLineEdit.text().strip()
         if not url:
             QMessageBox.warning(self.ui, "Błąd", "Wklej najpierw URL do filmu!")
             return
 
-        current_index = self.ui.formatComboBox.currentIndex()
-        bundle_dir = get_bundle_dir()
-        ytdlp_exe = os.path.join(bundle_dir, "yt-dlp.exe")
-
-        # Sprawdzamy, czy w ogóle mamy plik yt-dlp.exe obok programu
-        if not os.path.exists(ytdlp_exe):
-            QMessageBox.critical(self.ui, "Błąd krytyczny", "Brak pliku silnika pobierania (yt-dlp.exe)!")
+        if not url.startswith(("http://", "https://")):
+            QMessageBox.warning(self.ui, "Błąd", "Podany tekst nie wygląda jak poprawny adres URL.")
             return
+
+        bundle_dir = get_bundle_dir()
+        ytdlp_exe = os.path.join(bundle_dir, YTDLP_BIN)
+
+        if not os.path.exists(ytdlp_exe):
+            QMessageBox.critical(self.ui, "Błąd krytyczny", f"Brak pliku silnika pobierania ({YTDLP_BIN})!")
+            return
+
+        current_index = self.ui.formatComboBox.currentIndex()
 
         match current_index:
             case 0:  # Opcja: FILM
-                file_path, _ = QFileDialog.getSaveFileName(
-                    self.ui, "Zapisz film jako...", "", "Pliki wideo (*.mp4)"
-                )
-                if not file_path: 
+                file_path = self._get_save_path("Zapisz film jako...", "mp4", "Pliki wideo (*.mp4)")
+                if not file_path:
                     return
-                if not file_path.endswith('.mp4'): 
-                    file_path += '.mp4'
-                
-                # Przygotowanie szablonu nazwy dla yt-dlp bez dublowania .mp4
                 out_template = file_path.rsplit('.', 1)[0] + ".%(ext)s"
-                
                 command = [
                     ytdlp_exe,
                     "--ffmpeg-location", bundle_dir,
@@ -130,19 +136,12 @@ class DownloaderApp:
                     "-o", out_template,
                     url
                 ]
-                self.start_download_thread(command)
 
             case 1:  # Opcja: DŹWIĘK (MP3)
-                file_path, _ = QFileDialog.getSaveFileName(
-                    self.ui, "Zapisz dźwięk jako...", "", "Pliki audio (*.mp3)"
-                )
-                if not file_path: 
+                file_path = self._get_save_path("Zapisz dźwięk jako...", "mp3", "Pliki audio (*.mp3)")
+                if not file_path:
                     return
-                if not file_path.endswith('.mp3'): 
-                    file_path += '.mp3'
-                
                 out_template = file_path.rsplit('.', 1)[0] + ".%(ext)s"
-                
                 command = [
                     ytdlp_exe,
                     "--ffmpeg-location", bundle_dir,
@@ -153,22 +152,27 @@ class DownloaderApp:
                     "-o", out_template,
                     url
                 ]
-                self.start_download_thread(command)
+
+            case _:
+                return
+
+        self.start_download_thread(command)
 
     def start_download_thread(self, command):
-        # Blokujemy przycisk, zerujemy i pokazujemy pasek postępu
+        if self.worker and self.worker.isRunning():
+            return
+
         self.ui.pushButton.setEnabled(False)
         self.ui.progressBar.setValue(0)
         self.ui.progressBar.setHidden(False)
 
-        # Odpalenie wątku roboczego
         self.worker = DownloadWorker(command)
         self.worker.progress_changed.connect(self.ui.progressBar.setValue)
         self.worker.finished.connect(self.on_download_finished)
         self.worker.start()
 
     def on_download_finished(self, success, output_text):
-        # Przywracamy wygląd interfejsu
+        self.ui.progressBar.setValue(0)
         self.ui.progressBar.setHidden(True)
         self.ui.pushButton.setEnabled(True)
 
