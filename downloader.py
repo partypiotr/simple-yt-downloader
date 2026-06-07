@@ -28,16 +28,17 @@ def get_bundle_dir():
 class DownloadWorker(QThread):
     """Wątek tła, który pobiera dane z yt-dlp i na bieżąco aktualizuje pasek postępu"""
     progress_changed = Signal(int)  # Wysyła procenty (0-100) do głównego okna
+    status_changed = Signal(str)    # Wysyła aktualny tekst statusu
     finished = Signal(bool, str)    # Wysyła wynik (sukces, tekst_wyjsciowy) po zakończeniu
 
     def __init__(self, command):
         super().__init__()
         self.command = command
+        self._process = None
 
     def run(self):
         try:
-            # Odpalamy proces i łączymy stdout ze stderr
-            process = subprocess.Popen(
+            self._process = subprocess.Popen(
                 self.command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -47,31 +48,37 @@ class DownloadWorker(QThread):
             )
 
             full_output = []
-            
-            # Czytamy linie z yt-dlp w czasie rzeczywistym
+
             while True:
-                line = process.stdout.readline()
-                if not line and process.poll() is not None:
+                line = self._process.stdout.readline()
+                if not line and self._process.poll() is not None:
                     break
-                
+
                 if line:
                     full_output.append(line)
-                    # Szukamy procentów w tekście yt-dlp (np. "[download]  45.2% of...")
                     match = re.search(r'(\d+\.\d+)%', line)
                     if match:
                         percentage = int(float(match.group(1)))
                         self.progress_changed.emit(percentage)
+                    status = re.sub(r'\x1b\[[0-9;]*m', '', line).strip()
+                    if status:
+                        self.status_changed.emit(status)
 
-            process.wait()
+            self._process.wait()
             output_text = "".join(full_output)
 
-            if process.returncode == 0:
+            if self._process.returncode == 0:
                 self.finished.emit(True, "OK")
             else:
                 self.finished.emit(False, output_text)
 
         except Exception as e:
             self.finished.emit(False, str(e))
+
+    def cancel(self):
+        """Kończy proces yt-dlp jeśli jest uruchomiony."""
+        if self._process and self._process.poll() is None:
+            self._process.terminate()
 
 
 class DownloaderApp:
@@ -88,8 +95,11 @@ class DownloaderApp:
 
         self.ui.progressBar.setHidden(True)
         self.ui.progressBar.setValue(0)
+        self.ui.statusLabel.setHidden(True)
+        self.ui.cancelButton.setHidden(True)
 
         self.ui.pushButton.clicked.connect(self.save_file_dialog)
+        self.ui.cancelButton.clicked.connect(self.cancel_download)
         self.worker = None
 
     def _get_save_path(self, title: str, ext: str, filter_str: str) -> str | None:
@@ -158,6 +168,10 @@ class DownloaderApp:
 
         self.start_download_thread(command)
 
+    def cancel_download(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.cancel()
+
     def start_download_thread(self, command):
         if self.worker and self.worker.isRunning():
             return
@@ -165,15 +179,21 @@ class DownloaderApp:
         self.ui.pushButton.setEnabled(False)
         self.ui.progressBar.setValue(0)
         self.ui.progressBar.setHidden(False)
+        self.ui.statusLabel.setText("Łączenie...")
+        self.ui.statusLabel.setHidden(False)
+        self.ui.cancelButton.setHidden(False)
 
         self.worker = DownloadWorker(command)
         self.worker.progress_changed.connect(self.ui.progressBar.setValue)
+        self.worker.status_changed.connect(self.ui.statusLabel.setText)
         self.worker.finished.connect(self.on_download_finished)
         self.worker.start()
 
     def on_download_finished(self, success, output_text):
         self.ui.progressBar.setValue(0)
         self.ui.progressBar.setHidden(True)
+        self.ui.statusLabel.setHidden(True)
+        self.ui.cancelButton.setHidden(True)
         self.ui.pushButton.setEnabled(True)
 
         if success:
