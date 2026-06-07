@@ -175,16 +175,12 @@ class DownloaderApp:
         if success:
             QMessageBox.information(self.ui, "Sukces", "Pobieranie zakończone pomyślnie!")
         else:
-            # Tłumacz logów na język nauczycielski
             error_msg = "Wystąpił nieznany problem z zapisem pliku."
-            
-        
             if "ERROR:" in output_text:
                 for line in output_text.splitlines():
                     if line.startswith("ERROR:"):
                         error_msg = f"YouTube zgłosił problem:\n{line.replace('ERROR:', '').strip()}"
                         break
-            
             QMessageBox.critical(self.ui, "Błąd pobierania", error_msg)
 
     def show(self):
