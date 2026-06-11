@@ -7,7 +7,7 @@
 #nuitka-project:--include-data-files=yt-dlp.exe=yt-dlp.exe
 #nuitka-project:--company-name="Piotr Kiryk @ 3ForceIT"
 #nuitka-project:--product-name="SnatchIt"
-#nuitka-project:--product-version=1.3.0
+#nuitka-project:--product-version=2.0.0
 #nuitka-project:--windows-console-mode=attach
 #nuitka-project:--python-flag=no_site
 #nuitka-project:--python-flag=no_docstrings
@@ -17,6 +17,9 @@ import subprocess
 import os
 import re
 import glob
+import json
+import urllib.request
+import urllib.error
 
 # pylint: disable=import-error
 # pyrefly: ignore [missing-import]
@@ -28,6 +31,8 @@ from PySide6.QtCore import QFile, QThread, Signal
 # pylint: enable=import-error
 
 YTDLP_BIN = "yt-dlp.exe"
+APP_VERSION = "2.0.0"
+REPORT_URL = "https://partypiotr.xyz/snatchit/error-reporting.php"
 
 # Ordered list of (substring_to_match, polish_message) pairs.
 # First match wins — put more specific patterns before general ones.
@@ -70,12 +75,31 @@ _ERROR_TRANSLATIONS = [
 ]
 
 
-def _translate_error(raw_output: str) -> str:
+def _translate_error(raw_output: str) -> tuple[str, bool]:
+    """Returns (polish_message, is_known_error)."""
     lowered = raw_output.lower()
     for keyword, polish_msg in _ERROR_TRANSLATIONS:
         if keyword.lower() in lowered:
-            return polish_msg
-    return "Wystąpił nieoczekiwany błąd podczas pobierania."
+            return polish_msg, True
+    return "Wystąpił nieoczekiwany błąd podczas pobierania.", False
+
+
+def _send_error_report(raw_error: str) -> bool:
+    payload = json.dumps({
+        "app_version": APP_VERSION,
+        "error_text": raw_error[:2000],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        REPORT_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, OSError):
+        return False
 
 
 def get_bundle_dir() -> str:
@@ -279,18 +303,48 @@ class DownloaderApp:
         self.ui.pushButton.setEnabled(True)
 
         if success and output_text == "CANCELLED":
-            return  # user cancelled — silently restore UI, no dialog
+            return
         if success:
             QMessageBox.information(self.ui, "Sukces", "Pobieranie zakończone pomyślnie!")
-        else:
-            # Extract the raw ERROR: line if present, otherwise use all output
-            raw_error = output_text.strip()
-            for line in output_text.splitlines():
-                if line.startswith("ERROR:"):
-                    raw_error = line.replace("ERROR:", "").strip()
-                    break
-            friendly = _translate_error(raw_error)
+            return
+
+        raw_error = output_text.strip()
+        for line in output_text.splitlines():
+            if line.startswith("ERROR:"):
+                raw_error = line.replace("ERROR:", "").strip()
+                break
+
+        friendly, is_known = _translate_error(raw_error)
+
+        if is_known:
             QMessageBox.critical(self.ui, "Błąd pobierania", friendly)
+        else:
+            msg_box = QMessageBox(self.ui)
+            msg_box.setIcon(QMessageBox.Critical)
+            msg_box.setWindowTitle("Błąd pobierania")
+            msg_box.setText(friendly)
+            msg_box.setInformativeText(
+                "Możesz zgłosić ten błąd do 3ForceIT, abyśmy mogli go naprawić.\n"
+                "Zgłoszenie wyśle jedynie informację o błędzie \u2014 "
+                "nie zawiera żadnych danych osobowych."
+            )
+            close_btn = msg_box.addButton("Zamknij", QMessageBox.RejectRole)
+            report_btn = msg_box.addButton("Zgłoś błąd", QMessageBox.AcceptRole)
+            msg_box.setDefaultButton(close_btn)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == report_btn:
+                if _send_error_report(raw_error):
+                    QMessageBox.information(
+                        self.ui, "Dziękujemy",
+                        "Zgłoszenie zostało wysłane. Dziękujemy za pomoc!"
+                    )
+                else:
+                    QMessageBox.warning(
+                        self.ui, "Problem z wysłaniem",
+                        "Nie udało się wysłać zgłoszenia \u2014 "
+                        "sprawdź połączenie z internetem."
+                    )
 
     def show(self):
         self.ui.show()

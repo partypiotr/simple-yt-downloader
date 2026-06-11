@@ -1,0 +1,10 @@
+# Deny direct access to the SQLite database file
+<Files "reports.db">
+    Require all denied
+</Files>
+
+# Deny access to admin panel by default — restrict to your IP or use HTTP auth
+# Uncomment and set your IP:
+# <Files "admin.php">
+#     Require ip 1.2.3.4
+# </Files>
