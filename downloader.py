@@ -6,7 +6,7 @@
 #nuitka-project:--include-data-files=ffprobe.exe=ffprobe.exe
 #nuitka-project:--include-data-files=yt-dlp.exe=yt-dlp.exe
 #nuitka-project:--company-name="Piotr Kiryk @ 3ForceIT"
-#nuitka-project:--product-name="Pobieracz Youtube"
+#nuitka-project:--product-name="SnatchIt"
 #nuitka-project:--product-version=1.3.0
 #nuitka-project:--windows-console-mode=attach
 #nuitka-project:--python-flag=no_site
