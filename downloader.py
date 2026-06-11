@@ -1,4 +1,5 @@
 #nuitka-project:--onefile
+#nuitka-project:--onefile-tempdir-spec={CACHE_DIR}/{PRODUCT}/{VERSION}
 #nuitka-project:--plugin-enable=pyside6
 #nuitka-project:--include-data-files=design.ui=design.ui
 #nuitka-project:--include-data-files=ffmpeg.exe=ffmpeg.exe
@@ -8,16 +9,21 @@
 #nuitka-project:--product-name="Pobieracz Youtube"
 #nuitka-project:--product-version=1.3.0
 #nuitka-project:--windows-console-mode=attach
-"""Prosty pobieracz filmów i audio z YouTube oparty na yt-dlp i PySide6."""
+#nuitka-project:--python-flag=no_site
+#nuitka-project:--python-flag=no_docstrings
 
 import sys
 import subprocess
 import os
 import re
+import glob
 
 # pylint: disable=import-error
+# pyrefly: ignore [missing-import]
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+# pyrefly: ignore [missing-import]
 from PySide6.QtUiTools import QUiLoader
+# pyrefly: ignore [missing-import]
 from PySide6.QtCore import QFile, QThread, Signal
 # pylint: enable=import-error
 
@@ -25,30 +31,26 @@ YTDLP_BIN = "yt-dlp.exe"
 
 
 def get_bundle_dir() -> str:
-    """Zwraca katalog, w którym znajduje się plik wykonywalny lub skrypt."""
     if hasattr(sys, "frozen"):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 
 class DownloadWorker(QThread):
-    """Wątek tła pobierający dane z yt-dlp i raportujący postęp do głównego okna."""
 
-    progress_changed = Signal(int)  # Wysyła procenty (0-100) do głównego okna
-    status_changed = Signal(str)    # Wysyła aktualny tekst statusu
-    finished = Signal(bool, str)    # Wysyła wynik (sukces, tekst_wyjsciowy) po zakończeniu
-
-    def __init__(self, command):
-        """Inicjalizuje wątek z podaną komendą do uruchomienia."""
+    progress_changed = Signal(int)  
+    status_changed = Signal(str)    
+    finished = Signal(bool, str)    
+    def __init__(self, command, output_base: str):
         super().__init__()
         self.command = command
+        self._output_base = output_base
         self._process = None
+        self._cancelled = False
 
     def run(self):
-        """Uruchamia proces yt-dlp i na bieżąco przekazuje postęp przez sygnały."""
         try:
-            # Nie możemy użyć 'with' — potrzebujemy referencji do _process w cancel()
-            self._process = subprocess.Popen(  # pylint: disable=consider-using-with
+            self._process = subprocess.Popen( 
                 self.command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -77,7 +79,10 @@ class DownloadWorker(QThread):
             self._process.wait()
             output_text = "".join(full_output)
 
-            if self._process.returncode == 0:
+            if self._cancelled:
+                self._cleanup_partial_files()
+                self.finished.emit(True, "CANCELLED")
+            elif self._process.returncode == 0:
                 self.finished.emit(True, "OK")
             else:
                 self.finished.emit(False, output_text)
@@ -86,16 +91,25 @@ class DownloadWorker(QThread):
             self.finished.emit(False, str(e))
 
     def cancel(self):
-        """Kończy proces yt-dlp jeśli jest uruchomiony."""
         if self._process and self._process.poll() is None:
-            self._process.terminate()
+            self._cancelled = True
+            subprocess.call(
+                ['taskkill', '/F', '/T', '/PID', str(self._process.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+    def _cleanup_partial_files(self):
+        for f in glob.glob(self._output_base + '.*'):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
 
 
 class DownloaderApp:
-    """Główna klasa aplikacji — ładuje UI i obsługuje logikę pobierania."""
 
     def __init__(self):
-        """Ładuje plik interfejsu i podpina sygnały do slotów."""
         loader = QUiLoader()
         ui_file_path = os.path.join(get_bundle_dir(), "design.ui")
         ui_file = QFile(ui_file_path)
@@ -116,7 +130,6 @@ class DownloaderApp:
         self.worker = None
 
     def _get_save_path(self, title: str, ext: str, filter_str: str) -> str | None:
-        """Otwiera okno dialogowe zapisu i zwraca zweryfikowaną ścieżkę, lub None jeśli anulowano."""
         file_path, _ = QFileDialog.getSaveFileName(self.ui, title, "", filter_str)
         if not file_path:
             return None
@@ -125,7 +138,6 @@ class DownloaderApp:
         return file_path
 
     def save_file_dialog(self):
-        """Waliduje URL, otwiera okno zapisu i uruchamia pobieranie."""
         url = self.ui.uRLFilmuLineEdit.text().strip()
         if not url:
             QMessageBox.warning(self.ui, "Błąd", "Wklej najpierw URL do filmu!")
@@ -147,12 +159,14 @@ class DownloaderApp:
 
         current_index = self.ui.formatComboBox.currentIndex()
 
+        output_base = None
         match current_index:
             case 0:  # Opcja: FILM
                 file_path = self._get_save_path("Zapisz film jako...", "mp4", "Pliki wideo (*.mp4)")
                 if not file_path:
                     return
-                out_template = file_path.rsplit('.', 1)[0] + ".%(ext)s"
+                output_base = file_path.rsplit('.', 1)[0]
+                out_template = output_base + ".%(ext)s"
                 command = [
                     ytdlp_exe,
                     "--ffmpeg-location", bundle_dir,
@@ -168,7 +182,8 @@ class DownloaderApp:
                 file_path = self._get_save_path("Zapisz dźwięk jako...", "mp3", "Pliki audio (*.mp3)")
                 if not file_path:
                     return
-                out_template = file_path.rsplit('.', 1)[0] + ".%(ext)s"
+                output_base = file_path.rsplit('.', 1)[0]
+                out_template = output_base + ".%(ext)s"
                 command = [
                     ytdlp_exe,
                     "--ffmpeg-location", bundle_dir,
@@ -183,15 +198,13 @@ class DownloaderApp:
             case _:
                 return
 
-        self.start_download_thread(command)
+        self.start_download_thread(command, output_base)
 
     def cancel_download(self):
-        """Anuluje trwające pobieranie."""
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
 
-    def start_download_thread(self, command):
-        """Blokuje UI, pokazuje pasek postępu i uruchamia wątek pobierania."""
+    def start_download_thread(self, command, output_base: str):
         if self.worker and self.worker.isRunning():
             return
 
@@ -202,20 +215,21 @@ class DownloaderApp:
         self.ui.statusLabel.setHidden(False)
         self.ui.cancelButton.setHidden(False)
 
-        self.worker = DownloadWorker(command)  # pylint: disable=attribute-defined-outside-init
+        self.worker = DownloadWorker(command, output_base)  
         self.worker.progress_changed.connect(self.ui.progressBar.setValue)
         self.worker.status_changed.connect(self.ui.statusLabel.setText)
         self.worker.finished.connect(self.on_download_finished)
         self.worker.start()
 
     def on_download_finished(self, success, output_text):
-        """Przywraca UI po zakończeniu pobierania i informuje o wyniku."""
         self.ui.progressBar.setValue(0)
         self.ui.progressBar.setHidden(True)
         self.ui.statusLabel.setHidden(True)
         self.ui.cancelButton.setHidden(True)
         self.ui.pushButton.setEnabled(True)
 
+        if success and output_text == "CANCELLED":
+            return  # user cancelled — silently restore UI, no dialog
         if success:
             QMessageBox.information(self.ui, "Sukces", "Pobieranie zakończone pomyślnie!")
         else:
@@ -230,7 +244,6 @@ class DownloaderApp:
             QMessageBox.critical(self.ui, "Błąd pobierania", error_msg)
 
     def show(self):
-        """Wyświetla główne okno aplikacji."""
         self.ui.show()
 
 
