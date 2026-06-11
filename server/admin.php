@@ -1,7 +1,17 @@
 <?php
 // SnatchIT Admin Panel — Error Reports Viewer
-// Serves HTML page and JSON API for listing/managing reports
+// Protected by Pocket ID (OIDC)
 // ----------------------------------------------------------
+
+require_once __DIR__ . '/auth.php';
+
+// Handle logout
+if (isset($_GET['logout'])) {
+    oidc_logout();
+}
+
+// Require authentication — redirects to Pocket ID if not logged in
+$user = oidc_require_auth();
 
 $db_path = __DIR__ . '/reports.db';
 
@@ -62,6 +72,7 @@ if (isset($_GET['api'])) {
 }
 
 // --- HTML page ---
+$display_name = htmlspecialchars($user['name'] ?? $user['preferred_username'] ?? $user['email'] ?? 'Użytkownik');
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -83,6 +94,37 @@ if (isset($_GET['api'])) {
             max-width: 960px;
             margin: 0 auto;
             padding: 2rem 1.5rem;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            color: #8b8fa3;
+        }
+
+        .user-info strong {
+            color: #c5c8d4;
+        }
+
+        .user-info a {
+            color: #6d8aff;
+            text-decoration: none;
+            margin-left: 0.5rem;
+        }
+
+        .user-info a:hover {
+            text-decoration: underline;
         }
 
         header {
@@ -227,6 +269,13 @@ if (isset($_GET['api'])) {
 </head>
 <body>
     <div class="container">
+        <div class="top-bar">
+            <div class="user-info">
+                Zalogowano jako: <strong><?= $display_name ?></strong>
+                <a href="?logout">Wyloguj</a>
+            </div>
+        </div>
+
         <header>
             <div>
                 <h1><span>SnatchIT</span> — Zgłoszenia błędów</h1>

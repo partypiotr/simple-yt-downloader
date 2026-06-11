@@ -21,4 +21,7 @@ downloader.onefile-build/
 .vscode/
 .idea/
 *.swp
+
+# Server (secrets & runtime data)
 server/config.php
+server/reports.db
