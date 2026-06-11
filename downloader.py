@@ -31,7 +31,9 @@ YTDLP_BIN = "yt-dlp.exe"
 
 
 def get_bundle_dir() -> str:
-    if hasattr(sys, "frozen"):
+    # Nuitka compiled binaries expose __compiled__ in module globals.
+    # sys.frozen is PyInstaller-only and is never set by Nuitka.
+    if globals().get("__compiled__") or getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
@@ -233,14 +235,14 @@ class DownloaderApp:
         if success:
             QMessageBox.information(self.ui, "Sukces", "Pobieranie zakończone pomyślnie!")
         else:
-            error_msg = "Wystąpił nieznany problem z zapisem pliku."
-            if "ERROR:" in output_text:
-                for line in output_text.splitlines():
-                    if line.startswith("ERROR:"):
-                        error_msg = (
-                            f"YouTube zgłosił problem:\n{line.replace('ERROR:', '').strip()}"
-                        )
-                        break
+            error_msg = None
+            for line in output_text.splitlines():
+                if line.startswith("ERROR:"):
+                    error_msg = f"YouTube zgłosił problem:\n{line.replace('ERROR:', '').strip()}"
+                    break
+            if not error_msg:
+                # Fall back to raw output so the real cause is always visible
+                error_msg = output_text.strip() or "Wystąpił nieznany problem z zapisem pliku."
             QMessageBox.critical(self.ui, "Błąd pobierania", error_msg)
 
     def show(self):
