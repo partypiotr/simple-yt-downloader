@@ -29,6 +29,54 @@ from PySide6.QtCore import QFile, QThread, Signal
 
 YTDLP_BIN = "yt-dlp.exe"
 
+# Ordered list of (substring_to_match, polish_message) pairs.
+# First match wins — put more specific patterns before general ones.
+_ERROR_TRANSLATIONS = [
+    # Availability
+    ("video unavailable",          "Film jest niedostępny (usunięty lub zablokowany)."),
+    ("this video is private",       "Film jest prywatny — autor go ukrył."),
+    ("private video",               "Film jest prywatny — autor go ukrył."),
+    ("members only",                "Film jest dostępny tylko dla członków kanału."),
+    ("join this channel",           "Film jest dostępny tylko dla członków kanału."),
+    # Age / sign-in
+    ("sign in to confirm your age", "YouTube wymaga weryfikacji wieku — nie można pobrać bez konta."),
+    ("age-restricted",              "Film ma ograniczenie wiekowe — nie można go pobrać."),
+    ("confirm your age",            "Film ma ograniczenie wiekowe — nie można go pobrać."),
+    ("sign in",                     "YouTube wymaga zalogowania się, aby pobrać ten film."),
+    # Geo-blocking
+    ("not available in your country", "Film jest zablokowany w Twoim kraju."),
+    ("geo",                         "Film jest zablokowany w Twoim kraju."),
+    # Network
+    ("unable to download webpage",  "Brak połączenia z internetem lub YouTube jest niedostępny."),
+    ("network",                     "Wystąpił błąd sieciowy — sprawdź połączenie z internetem."),
+    ("timed out",                   "Połączenie z YouTube przekroczyło limit czasu. Spróbuj ponownie."),
+    ("connection reset",            "Połączenie zostało przerwane. Spróbuj ponownie."),
+    ("connectionreset",             "Połączenie zostało przerwane. Spróbuj ponownie."),
+    # Bad URL / not found
+    ("is not a valid url",          "Podany adres URL jest nieprawidłowy."),
+    ("unsupported url",             "Ten adres URL nie jest obsługiwany. SnatchIt działa tylko z YouTube."),
+    ("no video formats found",      "YouTube nie udostępnił żadnego formatu wideo dla tego filmu."),
+    ("requested format is not available", "Wybrany format nie jest dostępny dla tego filmu."),
+    # ffmpeg
+    ("ffmpeg",                      "Wystąpił błąd podczas przetwarzania dźwięku/wideo (ffmpeg)."),
+    # Disk
+    ("no space left",               "Brak miejsca na dysku — zwolnij trochę miejsca i spróbuj ponownie."),
+    ("permission denied",           "Brak uprawnień do zapisu pliku w wybranym miejscu."),
+    ("access is denied",            "Brak uprawnień do zapisu pliku w wybranym miejscu."),
+    # Playlist / live
+    ("is a playlist",               "Podany link prowadzi do playlisty — wklej link do pojedynczego filmu."),
+    ("live event",                  "Ten film to transmisja na żywo — nie można jej pobrać."),
+    ("this live event will begin",  "Transmisja jeszcze się nie rozpoczęła."),
+]
+
+
+def _translate_error(raw_output: str) -> str:
+    lowered = raw_output.lower()
+    for keyword, polish_msg in _ERROR_TRANSLATIONS:
+        if keyword.lower() in lowered:
+            return polish_msg
+    return "Wystąpił nieoczekiwany błąd podczas pobierania."
+
 
 def get_bundle_dir() -> str:
     # Nuitka compiled binaries expose __compiled__ in module globals.
@@ -235,15 +283,14 @@ class DownloaderApp:
         if success:
             QMessageBox.information(self.ui, "Sukces", "Pobieranie zakończone pomyślnie!")
         else:
-            error_msg = None
+            # Extract the raw ERROR: line if present, otherwise use all output
+            raw_error = output_text.strip()
             for line in output_text.splitlines():
                 if line.startswith("ERROR:"):
-                    error_msg = f"YouTube zgłosił problem:\n{line.replace('ERROR:', '').strip()}"
+                    raw_error = line.replace("ERROR:", "").strip()
                     break
-            if not error_msg:
-                # Fall back to raw output so the real cause is always visible
-                error_msg = output_text.strip() or "Wystąpił nieznany problem z zapisem pliku."
-            QMessageBox.critical(self.ui, "Błąd pobierania", error_msg)
+            friendly = _translate_error(raw_error)
+            QMessageBox.critical(self.ui, "Błąd pobierania", friendly)
 
     def show(self):
         self.ui.show()
