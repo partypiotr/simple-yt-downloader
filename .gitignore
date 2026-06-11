@@ -21,3 +21,4 @@ downloader.onefile-build/
 .vscode/
 .idea/
 *.swp
+server/config.php
