@@ -131,6 +131,7 @@ class DownloadWorker(QThread):
                 self.command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 errors='ignore',
                 bufsize=1
@@ -172,6 +173,7 @@ class DownloadWorker(QThread):
             self._cancelled = True
             subprocess.call(
                 ['taskkill', '/F', '/T', '/PID', str(self._process.pid)],
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
