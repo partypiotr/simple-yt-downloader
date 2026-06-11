@@ -92,13 +92,16 @@ def _send_error_report(raw_error: str) -> bool:
     req = urllib.request.Request(
         REPORT_URL,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": f"SnatchIT/{APP_VERSION}",
+        },
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status == 200
-    except (urllib.error.URLError, OSError):
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
         return False
 
 
@@ -215,6 +218,11 @@ class DownloaderApp:
         url = self.ui.uRLFilmuLineEdit.text().strip()
         if not url:
             QMessageBox.warning(self.ui, "Błąd", "Wklej najpierw URL do filmu!")
+            return
+
+        # Debug trigger: type "debug:report" to test the error report dialog
+        if url == "debug:report":
+            self.on_download_finished(False, "ERROR: [debug] Simulated unknown error for testing")
             return
 
         if not url.startswith(("http://", "https://")):
