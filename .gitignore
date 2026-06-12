@@ -22,6 +22,6 @@ downloader.onefile-build/
 .idea/
 *.swp
 
-# Server (secrets & runtime data)
-server/config.php
-server/reports.db
+# Server
+server/
+
