@@ -127,11 +127,16 @@ class DownloadWorker(QThread):
 
     def run(self):
         try:
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NO_WINDOW
+
             self._process = subprocess.Popen( 
                 self.command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
+                creationflags=creationflags,
                 text=True,
                 errors='ignore',
                 bufsize=1
@@ -171,11 +176,16 @@ class DownloadWorker(QThread):
     def cancel(self):
         if self._process and self._process.poll() is None:
             self._cancelled = True
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NO_WINDOW
+
             subprocess.call(
                 ['taskkill', '/F', '/T', '/PID', str(self._process.pid)],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags
             )
 
     def _cleanup_partial_files(self):
